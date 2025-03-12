@@ -1,9 +1,13 @@
 from odoo import models,fields,api # type: ignore
-from odoo.exceptions import UserError # type: ignore
+from odoo.exceptions import UserError,ValidationError # type: ignore
+from odoo.tools import float_utils # type: ignore
 
 class EstateProperty(models.Model):
     _name = "estate.property"
     _description="Estate Property"
+    _order = "id desc"
+
+
     name=fields.Char(required=True,string="Titre")
     description=fields.Text()
     postcode=fields.Char(string="Code Postal")
@@ -33,6 +37,25 @@ class EstateProperty(models.Model):
     total_area=fields.Float(compute='_compute_total_area',string="Surface totale (m²)")
     best_price=fields.Float(compute='_compute_best_price',string="Meilleure offre")
 
+
+    _sql_constraints = [
+        ('expected_price', 'CHECK(expected_price > 0)',
+         'Le prix attendu doit être supérieur à 0'),
+    ]
+
+    _sql_constraints = [
+        ('selling_price', 'CHECK(selling_price >= 0)',
+         'Le prix de vente doit être supérieur à 0'),
+    ]
+
+    # @api.constrains('selling_price','expected_price')       
+    # def _check_price(self):
+    #     for prop in self:
+    #         if not float_utils.float_is_zero(prop.selling_price, precision_rounding=prop.selling_price):
+    #             if float_utils.float_compare(prop.selling_price,0.9*prop.expected_price, precision_rounding=prop.selling_price)<0:
+    #                 raise ValidationError("Le prix de vente doit être supérieur à 90 pourcent du prix attendu !")
+               
+
     @api.depends('living_area', 'garden_area')
     def _compute_total_area(self):
         for prop in self:
@@ -41,7 +64,10 @@ class EstateProperty(models.Model):
     @api.depends('offer_ids.price')
     def _compute_best_price(self):
         for prop in self:
-            prop.best_price = max(prop.offer_ids.mapped('price'))
+            if prop.offer_ids :
+                prop.best_price = max(prop.offer_ids.mapped('price'))
+            else:
+                prop.best_price = 0
 
     @api.onchange("garden")
     def _onchange_garden(self):
@@ -64,6 +90,13 @@ class EstateProperty(models.Model):
             raise UserError('Impossible d\'annuler une propriété vendue')
         self.write({'state': 'canceled'})
         return True
+
+    @api.ondelete(at_uninstall=False) 
+    def ondelete(self):
+        for prop in self:
+            if prop.state!='new' and prop.state!='offer_received':
+                raise UserError('Impossible de supprimer une propriété qui n\'est pas nouvelle ou pour laquelle une offre a été reçue')
+        return self
 
  
         
